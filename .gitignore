@@ -1,1 +1,6 @@
-__pycache__/\n.venv/\n.env\n*.pem\n*.key\n*.der\n
+__pycache__/
+.venv/
+.env
+*.pem
+*.key
+*.der
