@@ -4,7 +4,7 @@ name: CI / Build / Publish
 on:
   pull_request:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
 
 # Required permissions for keyless cosign + GHCR push + SARIF upload
 permissions:
@@ -132,3 +132,4 @@ jobs:
       - name: Annotate release (optional)
         run: |
           echo "Image published: ghcr.io/${{ github.repository }}:${{ github.sha }}"
+
