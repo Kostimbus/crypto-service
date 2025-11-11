@@ -2,10 +2,11 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey, Ed25519PublicKey
-)
-from .crypto import Signer, AEAD
+# from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+#     Ed25519PrivateKey, Ed25519PublicKey
+# )
+from typing import cast
+from .crypto import Signer, AEAD, b64d, b64e, Envelope as EnvelopeTypedDict
 from .crypto import b64d, b64e
 from .keys import load_ed25519_pair, load_aead_key
 
@@ -28,32 +29,61 @@ aead = AEAD(aead_key, AEAD_KID)
 class Msg(BaseModel):
     data: str  # base64
 
+
 class Signed(BaseModel):
     data: str
     sig: str
 
+
 class Envelope(BaseModel):
-    v: int; alg: str; kid: str; nonce: str; aad: str; ct: str
+    v: int
+    alg: str
+    kid: str
+    nonce: str
+    aad: str
+    ct: str
 
 
-@app.post("/sign")
-def sign(m: Msg):
-    return signer.sign(b64d(m.data))
+class SignResult(BaseModel):
+    kid: str
+    sig: str
 
-@app.post("/verify")
-def verify(s: Signed):
+
+class VerifyResult(BaseModel):
+    valid: bool
+
+
+class Decrypted(BaseModel):
+    data: str
+
+
+@app.post("/sign", response_model=SignResult)
+def sign(m: Msg) -> SignResult:
+    """Sign base64-encoded data and return {kid, sig}."""
+    raw = signer.sign(b64d(m.data))
+    # construct a Pydantic model (ensures types for mypy & FastAPI)
+    return SignResult(**raw)
+
+
+@app.post("/verify", response_model=VerifyResult)
+def verify(s: Signed) -> VerifyResult:
+    """Verify signature for base64-encoded data."""
     ok = signer.verify(b64d(s.data), s.sig)
-    return {"valid": ok}
+    return VerifyResult(valid=ok)
 
-@app.post("/encrypt")
-def encrypt(m: Msg):
+
+@app.post("/encrypt", response_model=Envelope)
+def encrypt(m: Msg) -> Envelope:
+    """Encrypt base64-encoded data and return the envelope object."""
     env = aead.encrypt(b64d(m.data), aad=b"ctx:v1")
-    return env
+    return Envelope(**env)
 
-@app.post("/decrypt")
-def decrypt(env: Envelope):
+
+@app.post("/decrypt", response_model=Decrypted)
+def decrypt(env: Envelope) -> Decrypted:
     try:
-        pt = aead.decrypt(env.dict())
-        return {"data": b64e(pt)}
+        envelope_typed = cast(EnvelopeTypedDict, env.dict())
+        pt = aead.decrypt(envelope_typed)
+        return Decrypted(data=b64e(pt))
     except Exception:
         raise HTTPException(status_code=400, detail="decryption failed")

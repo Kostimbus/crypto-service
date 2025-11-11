@@ -1,0 +1,134 @@
+name: CI / Build / Publish
+
+# Run on PRs and pushes to main (adjust branch names if needed)
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+# Required permissions for keyless cosign + GHCR push + SARIF upload
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+
+jobs:
+  test-and-scan:
+    name: Run tests & scans
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+
+      - name: Install runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install dev/test deps and install package (editable)
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Generate CI keys (non-interactive)
+        run: python -m crypto_service.generate_keys --kid ci --overwrite
+
+      - name: Lint (ruff) & type checks (mypy)
+        run: |
+          ruff check .
+          mypy src
+
+      - name: Unit & property tests
+        run: pytest -q
+
+      - name: Bandit (security lints)
+        run: bandit -r src -f txt -o bandit.txt || true
+
+      - name: Semgrep (AppSec)
+        run: semgrep ci --config p/owasp-top-ten --config p/python --sarif --output semgrep.sarif || true
+
+      - name: Gitleaks (secrets scan)
+        # gitleaks is a non-Python tool; install via curl binary
+        run: |
+          curl -sL -o /usr/local/bin/gitleaks https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks-linux-amd64
+          chmod +x /usr/local/bin/gitleaks
+          gitleaks detect -v --report-format sarif --report-path gitleaks.sarif || true
+
+      - name: Upload SARIF (Semgrep)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+      - name: Upload SARIF (Gitleaks)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+
+  build-and-publish:
+    name: Build image, SBOM, scan & sign, push to GHCR
+    runs-on: ubuntu-latest
+    needs: test-and-scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU (for multi-platform) & Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image (GHCR)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
+          platforms: linux/amd64,linux/arm64
+
+      - name: Install Syft (SBOM) & generate SBOM for image
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft ghcr.io/${{ github.repository }}:${{ github.sha }} -o spdx-json=sbom.json
+
+      - name: Install Grype & scan SBOM (CVE check)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype sbom:sbom.json -o table || true
+
+      - name: Install cosign
+        run: |
+          COSIGN_VER="v2.14.0"
+          curl -sSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VER}/cosign-linux-amd64" -o /usr/local/bin/cosign
+          chmod +x /usr/local/bin/cosign
+
+      - name: Sign image with cosign (keyless, OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          # keyless sign uses the runner's OIDC id-token; workflow permissions must include id-token: write
+          cosign sign --keyless ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Annotate release (optional)
+        run: |
+          echo "Image published: ghcr.io/${{ github.repository }}:${{ github.sha }}"

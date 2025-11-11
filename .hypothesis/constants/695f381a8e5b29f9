@@ -1,0 +1,4 @@
+# file: /home/midneys/crypto-service/src/crypto_service/crypto.py
+# hypothesis_version: 6.140.3
+
+['CHACHA20-POLY1305', 'aad', 'alg', 'ct', 'kid', 'nonce', 'sig', 'v']

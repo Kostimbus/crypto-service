@@ -1,0 +1,42 @@
+Metadata-Version: 2.4
+Name: crypto-service
+Version: 0.1.0
+Summary: Crypto service (dev)
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+
+# Crypto Service
+
+## Used algorithms
+
+| Serivce  | Algortihm          |
+|----------|--------------------|
+| Signature| Ed25519            |
+| AEAD     | ChaCha20-Poly1305  |
+
+### Envelope format
+JSON fields
+
+    {
+        "v": 1,
+        "alg": "CHACHA20-POLY1305",
+        "kid": "k1",
+        "nonce": "<base64>",
+        "aad": "<base64>",
+        "ct": "<base64>"
+    }
+
+
+
+# Setup 
+
+## Python environment
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements-dev.txt
+
+## System tools
+- Install gitleaks separately (not a Python package)
+    - Linux: sudo apt install gitleaks
+    - macOS: brew install gitleaks
+    - Windows: choco install gitleaks

@@ -1,4 +1,4 @@
-import base64, os
+import os
 from hypothesis import given, strategies as st
 from crypto_service.crypto import AEAD, Signer, b64e
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -26,6 +26,7 @@ def test_aead_confidentiality(pt, aad):
     assert e1["ct"] != e2["ct"]  # fresh nonce ⇒ different ciphertext
     # wrong AAD ⇒ decrypt fails
     from pytest import raises
-    bad = dict(e1); bad["aad"] = b64e(aad + b"x")
+    bad = dict(e1)
+    bad["aad"] = b64e(aad + b"x")
     with raises(Exception):
         a.decrypt(bad)
