@@ -126,10 +126,8 @@ jobs:
           chmod +x /usr/local/bin/cosign
 
       - name: Sign image with cosign (keyless, OIDC)
-        env:
-          COSIGN_EXPERIMENTAL: "1"
         run: |
-          cosign sign --keyless ghcr.io/${{ env.REPO }}:${{ github.sha }}
+          cosign sign ghcr.io/${{ env.REPO }}:${{ github.sha }}
 
       - name: Annotate release (optional)
         run: |
